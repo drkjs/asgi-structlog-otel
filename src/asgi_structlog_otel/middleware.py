@@ -1,14 +1,23 @@
+from typing import Any
+from collections.abc import Callable
+
 import structlog
 from asgi_structlog_otel.extractor import Extractor, extract_otel
 
 
 
-class TraceContextMiddelware:
+
+class TraceContextMiddleware:
     def __init__(self, app, extractors: list[Extractor] | None = None):
         self.app = app
         self.extractors = extractors or [extract_otel]
 
-    async def __call__(self, scope, receive, send):
+    async def __call__(
+        self,
+        scope: dict[str, Any],
+        receive: Callable[[], Any],
+        send: Callable[[dict[str, Any]], Any]
+    ):
         
         # The ASGI specification only supports HTTP/WebSocket and Lifespan - if we don't have one of the first two, we don't instrument. 
         if scope.get("type") not in ("http", "websocket"):
