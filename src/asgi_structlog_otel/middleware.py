@@ -24,7 +24,7 @@ class TraceContextMiddleware:
             await self.app(scope, receive, send)
             return None
         
-        ctx = {}
+        ctx: dict[str, Any] = {}
 
         for extractor in self.extractors:
             try:
