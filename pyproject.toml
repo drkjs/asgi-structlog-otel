@@ -41,18 +41,6 @@ all = [
     "asgi-structlog-otel[sdk,gcp,aws]",
 ]
 
-# Development dependencies
-dev = [
-    "pytest>=7.4.0",
-    "pytest-asyncio>=0.21.0",
-    "pytest-cov>=4.1.0",
-    "httpx>=0.24.0",  # For testing ASGI apps
-    "fastapi>=0.100.0",  # For integration tests
-    "uvicorn>=0.23.0",  # For integration tests
-    "ruff>=0.0.280",
-    "mypy>=1.5.0",
-    "pre-commit>=3.3.0",
-]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/asgi_structlog_otel"]
@@ -60,7 +48,6 @@ packages = ["src/asgi_structlog_otel"]
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
-    "/tests",
     "/README.md",
     "/LICENSE",
 ]
@@ -72,6 +59,7 @@ target-version = "py311"
 
 
 [tool.pytest.ini_options]
+pythonpath = ["."]
 testpaths = ["tests"]
 asyncio_mode = "auto"
 
@@ -82,4 +70,18 @@ omit = [
     "*/tests/*",
     "*/__pycache__/*",
     "*/site-packages/*",
+]
+
+[dependency-groups]
+dev = [
+    "opentelemetry-sdk",
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "pytest-cov>=4.1.0",
+    "httpx>=0.24.0",  # For testing ASGI apps
+    "fastapi>=0.100.0",  # For integration tests
+    "uvicorn>=0.23.0",  # For integration tests
+    "ruff>=0.0.280",
+    "mypy>=1.5.0",
+    "pre-commit>=3.3.0",
 ]
