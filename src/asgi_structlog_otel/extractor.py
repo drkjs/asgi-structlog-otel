@@ -18,6 +18,6 @@ def extract_otel(scope: dict[str, Any]) -> dict[str, Any]:
 
 
     return {
-        "trace-id": trace.format_trace_id(span_ctx.trace_id),
-        "parent-id": trace.format_span_id(span_ctx.span_id),
+        "trace_id": trace.format_trace_id(span_ctx.trace_id),
+        "span_id": trace.format_span_id(span_ctx.span_id),
     }
