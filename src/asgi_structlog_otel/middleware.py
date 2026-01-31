@@ -1,8 +1,11 @@
+import logging
 from typing import Any
 from collections.abc import Callable
 
 import structlog
 from asgi_structlog_otel.extractor import Extractor, extract_otel
+
+logger = logging.getLogger(__name__)
 
 
 
@@ -30,7 +33,12 @@ class TraceContextMiddleware:
             try:
                 data = extractor(scope)
             except Exception as e:
-                pass 
+                logger.warning(
+                    "Extractor failed: %s",
+                    extractor.__name__ if hasattr(extractor, '__name__') else str(extractor),
+                    exc_info=True
+                )
+                continue
             if data:
                 ctx.update(data)
         
@@ -39,6 +47,6 @@ class TraceContextMiddleware:
         try:
             await self.app(scope, receive, send)
         finally:
-            structlog.contextvars.unbind_contextvars(ctx.keys())
+            structlog.contextvars.unbind_contextvars(*ctx.keys())
         
         
