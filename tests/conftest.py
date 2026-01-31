@@ -24,3 +24,18 @@ def tracer(tracer_provider) -> Tracer:
     Actually provide a fully setup tracer.
     """
     return trace.get_tracer(__name__)
+
+@pytest.fixture(autouse=True)
+def clear_structlog_context():
+    """
+    Clear structlog context before and after each test to prevent leakage.
+    """
+    import structlog
+
+    # Clear before test
+    structlog.contextvars.clear_contextvars()
+
+    yield
+
+    # Clear after test
+    structlog.contextvars.clear_contextvars()
