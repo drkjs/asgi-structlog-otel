@@ -8,11 +8,7 @@ from typing import Callable
 import structlog
 from structlog.typing import Processor, WrappedLogger
 
-from asgi_structlog_otel.logging.formatter import (
-    ConsoleFormatter,
-    Formatter,
-    JSONFormatter,
-)
+from asgi_structlog_otel.logging.formatter import Formatter
 
 
 class FormatterType(StrEnum):
@@ -91,25 +87,29 @@ def configure_logging(
 
     Note:
         The processor chain always includes structlog.contextvars.merge_contextvars
-        to pick up trace context from TraceContextMiddleware. Custom processors
-        are inserted before the final wrap_for_formatter processor.
+        to pick up trace context from TraceContextMiddleware.
     """
-    formatter_instance = _resolve_formatter(formatter)
+    formatter_processors = _resolve_formatter(formatter)
     base_processors = _build_base_processors()
 
     if processors:
-        # Insert custom processors before wrap_for_formatter (last in chain)
-        base_processors = base_processors[:-1] + processors + [base_processors[-1]]
+        base_processors = base_processors + processors
 
     if configure_stdlib:
+        # Add wrap_for_formatter for stdlib integration
+        base_processors = base_processors + [
+            structlog.stdlib.ProcessorFormatter.wrap_for_formatter
+        ]
         _configure_stdlib_logging(
-            formatter_instance=formatter_instance,
+            formatter_processors=formatter_processors,
             base_processors=base_processors,
             level=level,
         )
         if logger_factory is None:
             logger_factory = structlog.stdlib.LoggerFactory()
     else:
+        # Add formatter processors directly to the chain
+        base_processors = base_processors + formatter_processors
         if logger_factory is None:
             logger_factory = structlog.PrintLoggerFactory()
 
@@ -121,27 +121,27 @@ def configure_logging(
 
 
 def _resolve_formatter(
-    formatter: Formatter | FormatterType | None,
-) -> Formatter | None:
-    """Resolve formatter specification to a formatter instance.
+    formatter: Formatter | FormatterType,
+) -> list[Processor]:
+    """Resolve formatter specification to processors.
 
     Args:
-        formatter: FormatterType enum, Formatter instance, or None.
+        formatter: FormatterType enum or Formatter instance.
 
     Returns:
-        Formatter instance or None.
+        List of processors for the formatter.
     """
     match formatter:
         case FormatterType.AUTO:
-            return ConsoleFormatter() if sys.stderr.isatty() else JSONFormatter()
+            if sys.stderr.isatty():
+                return [structlog.dev.ConsoleRenderer()]
+            return [structlog.processors.JSONRenderer()]
         case FormatterType.JSON:
-            return JSONFormatter()
+            return [structlog.processors.JSONRenderer()]
         case FormatterType.CONSOLE:
-            return ConsoleFormatter()
-        case None:
-            return None
+            return [structlog.dev.ConsoleRenderer()]
         case _:
-            return formatter
+            return formatter.get_processors()
 
 
 def _build_base_processors() -> list[Processor]:
@@ -154,9 +154,6 @@ def _build_base_processors() -> list[Processor]:
         merge_contextvars MUST be first in the chain to pick up trace_id and
         span_id that TraceContextMiddleware binds to contextvars. Without this,
         trace correlation will not work.
-
-        wrap_for_formatter MUST be last for stdlib logging integration to work
-        correctly with ProcessorFormatter.
     """
     return [
         structlog.contextvars.merge_contextvars,
@@ -165,28 +162,21 @@ def _build_base_processors() -> list[Processor]:
         structlog.processors.StackInfoRenderer(),
         structlog.processors.format_exc_info,
         structlog.processors.UnicodeDecoder(),
-        structlog.stdlib.ProcessorFormatter.wrap_for_formatter,
     ]
 
 
 def _configure_stdlib_logging(
-    formatter_instance: Formatter | None,
+    formatter_processors: list[Processor],
     base_processors: list[Processor],
     level: int,
 ) -> None:
     """Configure stdlib logging to forward to structlog.
 
     Args:
-        formatter_instance: Formatter to use for output. If None, defaults
-            to JSON formatter.
+        formatter_processors: Processors for formatting output.
         base_processors: Base processor chain.
         level: Logging level to set on root logger.
     """
-    if formatter_instance:
-        formatter_processors = formatter_instance.get_processors()
-    else:
-        formatter_processors = [structlog.processors.JSONRenderer()]
-
     handler = logging.StreamHandler()
     handler.setFormatter(
         structlog.stdlib.ProcessorFormatter(

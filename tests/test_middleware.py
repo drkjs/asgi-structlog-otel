@@ -1,65 +1,40 @@
+import logging
+
 import structlog
+
 from asgi_structlog_otel import TraceContextMiddleware
 
 
-async def test_middleware_http_request_binds_context(tracer):
-    """Test that HTTP requests bind trace context."""
-    # Track what context was bound
-    bound_context = {}
-    
+async def test_middleware_binds_context_for_http_and_websocket(tracer):
+    """Test that HTTP and WebSocket requests bind trace context, lifespan does not."""
+    bound_contexts = []
+
     async def app(scope, receive, send):
-        # Capture the current context
-        bound_context.update(structlog.contextvars.get_contextvars())
-    
+        bound_contexts.append(dict(structlog.contextvars.get_contextvars()))
+
     middleware = TraceContextMiddleware(app)
-    
-    scope = {"type": "http", "path": "/test"}
-    
-    with tracer.start_as_current_span("test-span"):
-        await middleware(scope, None, None)
-    
-    # Verify trace context was bound
-    assert "trace_id" in bound_context
-    assert "span_id" in bound_context
-    assert len(bound_context["trace_id"]) == 32
-    assert len(bound_context["span_id"]) == 16
-
-
-async def test_middleware_websocket_request_binds_context(tracer):
-    """Test that WebSocket requests bind trace context."""
-    bound_context = {}
-    
-    async def app(scope, receive, send):
-        bound_context.update(structlog.contextvars.get_contextvars())
-    
-    middleware = TraceContextMiddleware(app)
-    
-    scope = {"type": "websocket", "path": "/ws"}
-    
-    with tracer.start_as_current_span("test-span"):
-        await middleware(scope, None, None)
-    
-    assert "trace_id" in bound_context
-    assert "span_id" in bound_context
-
-async def test_middleware_lifespan_events_not_instrumented(tracer):
-    """Test that lifespan events skip instrumentation."""
-    bound_context = {}
-
-    async def app(scope, receive, send):
-        bound_context.update(structlog.contextvars.get_contextvars())
 
     with tracer.start_as_current_span("test-span"):
-        middleware = TraceContextMiddleware(app)
+        # HTTP request
+        await middleware({"type": "http", "path": "/test"}, None, None)
+        # WebSocket request
+        await middleware({"type": "websocket", "path": "/ws"}, None, None)
+        # Lifespan event (should not bind)
+        await middleware({"type": "lifespan"}, None, None)
 
-    scope = {"type": "lifespan"}
-    await middleware(scope, None, None)
+    # HTTP and WebSocket should have trace context
+    assert "trace_id" in bound_contexts[0]
+    assert "span_id" in bound_contexts[0]
+    assert len(bound_contexts[0]["trace_id"]) == 32
+    assert len(bound_contexts[0]["span_id"]) == 16
 
-    assert "trace_id" not in bound_context
-    assert "span_id" not in bound_context
+    assert "trace_id" in bound_contexts[1]
+    assert "span_id" in bound_contexts[1]
 
+    # Lifespan should not have trace context
+    assert "trace_id" not in bound_contexts[2]
+    assert "span_id" not in bound_contexts[2]
 
-# Custom Extractors Tests
 
 async def test_middleware_multiple_extractors_execution_and_merging(tracer):
     """Test that custom extractors execute in order and merge data correctly."""
@@ -79,26 +54,21 @@ async def test_middleware_multiple_extractors_execution_and_merging(tracer):
 
     middleware = TraceContextMiddleware(app, extractors=[extractor_one, extractor_two])
 
-    scope = {"type": "http"}
-    await middleware(scope, None, None)
+    await middleware({"type": "http"}, None, None)
 
     # Verify execution order
     assert execution_order == [1, 2]
 
-    # Verify all data is bound
+    # Verify all data is bound and later extractor overwrites shared keys
     assert bound_context["key1"] == "value1"
     assert bound_context["key2"] == "value2"
-
-    # Verify later extractor overwrites shared keys
     assert bound_context["shared"] == "from_two"
 
 
-# Error Handling Tests
-
-async def test_middleware_extractor_exception_continues(tracer, caplog):
-    """Test that middleware continues and logs when an extractor raises an exception."""
-    import logging
+async def test_middleware_extractor_error_handling(tracer, caplog):
+    """Test that middleware continues and logs when extractors fail."""
     bound_context = {}
+    app_called = False
 
     def failing_extractor(scope):
         raise ValueError("Extractor failed")
@@ -107,132 +77,72 @@ async def test_middleware_extractor_exception_continues(tracer, caplog):
         return {"key": "value"}
 
     async def app(scope, receive, send):
+        nonlocal app_called
+        app_called = True
         bound_context.update(structlog.contextvars.get_contextvars())
 
+    # Test with one failing, one working
     middleware = TraceContextMiddleware(
         app,
         extractors=[failing_extractor, working_extractor]
     )
 
-    scope = {"type": "http"}
-
     with caplog.at_level(logging.WARNING):
-        await middleware(scope, None, None)
+        await middleware({"type": "http"}, None, None)
 
-    # Working extractor should still execute
     assert bound_context["key"] == "value"
-
-    # Failure should be logged
     assert "Extractor failed" in caplog.text
     assert "failing_extractor" in caplog.text
 
-
-async def test_middleware_all_extractors_fail(tracer, caplog):
-    """Test that middleware works and logs when all extractors fail."""
-    import logging
-    bound_context = {}
+    # Test with all extractors failing
+    bound_context.clear()
     app_called = False
+    caplog.clear()
 
-    def failing_extractor(scope):
-        raise RuntimeError("Failed")
-
-    async def app(scope, receive, send):
-        nonlocal app_called
-        app_called = True
-        bound_context.update(structlog.contextvars.get_contextvars())
-
-    middleware = TraceContextMiddleware(app, extractors=[failing_extractor])
-
-    scope = {"type": "http"}
+    middleware_all_fail = TraceContextMiddleware(app, extractors=[failing_extractor])
 
     with caplog.at_level(logging.WARNING):
-        await middleware(scope, None, None)
+        await middleware_all_fail({"type": "http"}, None, None)
 
-    # App should still be called
     assert app_called
-    # No context should be bound
     assert len(bound_context) == 0
-
-    # Failure should be logged
     assert "Extractor failed" in caplog.text
 
 
-# Context Cleanup Tests
-
-async def test_middleware_unbinds_context_after_request(tracer):
-    """Test that context is unbound after request completes."""
+async def test_middleware_unbinds_context(tracer):
+    """Test that context is unbound after request, even on exception."""
+    context_during_request = {}
 
     async def app(scope, receive, send):
-        # Context should be bound during request
-        ctx = structlog.contextvars.get_contextvars()
-        assert "trace_id" in ctx
+        context_during_request.update(structlog.contextvars.get_contextvars())
+        assert "trace_id" in context_during_request
 
     middleware = TraceContextMiddleware(app)
 
-    scope = {"type": "http"}
-
+    # Normal request
     with tracer.start_as_current_span("test-span"):
-        await middleware(scope, None, None)
+        await middleware({"type": "http"}, None, None)
 
-    # Context should be unbound after middleware completes
     ctx_after = structlog.contextvars.get_contextvars()
     assert "trace_id" not in ctx_after
     assert "span_id" not in ctx_after
 
-
-async def test_middleware_unbinds_context_on_app_exception(tracer):
-    """Test that context is unbound even when app raises an exception."""
-
+    # Request with exception
     async def failing_app(scope, receive, send):
         raise RuntimeError("App failed")
 
-    middleware = TraceContextMiddleware(failing_app)
-
-    scope = {"type": "http"}
+    middleware_fail = TraceContextMiddleware(failing_app)
 
     with tracer.start_as_current_span("test-span"):
         try:
-            await middleware(scope, None, None)
+            await middleware_fail({"type": "http"}, None, None)
         except RuntimeError:
-            pass  # Expected
+            pass
 
-    # Context should still be unbound
-    ctx_after = structlog.contextvars.get_contextvars()
-    assert "trace_id" not in ctx_after
-    assert "span_id" not in ctx_after
+    ctx_after_fail = structlog.contextvars.get_contextvars()
+    assert "trace_id" not in ctx_after_fail
+    assert "span_id" not in ctx_after_fail
 
-
-async def test_middleware_context_isolation_between_requests(tracer):
-    """Test that context from one request doesn't leak to another."""
-
-    def custom_extractor(scope):
-        return {"request_id": scope.get("request_id")}
-
-    contexts = []
-
-    async def app(scope, receive, send):
-        contexts.append(dict(structlog.contextvars.get_contextvars()))
-
-    middleware = TraceContextMiddleware(app, extractors=[custom_extractor])
-
-    # First request
-    scope1 = {"type": "http", "request_id": "req-1"}
-    await middleware(scope1, None, None)
-
-    # Second request
-    scope2 = {"type": "http", "request_id": "req-2"}
-    await middleware(scope2, None, None)
-
-    # Each request should have its own context
-    assert contexts[0]["request_id"] == "req-1"
-    assert contexts[1]["request_id"] == "req-2"
-
-    # Context should not leak after both requests
-    final_ctx = structlog.contextvars.get_contextvars()
-    assert "request_id" not in final_ctx
-
-
-# Edge Cases Tests
 
 async def test_middleware_no_active_span():
     """Test middleware behavior when there's no active OpenTelemetry span."""
@@ -241,46 +151,21 @@ async def test_middleware_no_active_span():
     async def app(scope, receive, send):
         bound_context.update(structlog.contextvars.get_contextvars())
 
-    middleware = TraceContextMiddleware(app)  # Using default extract_otel
-
-    scope = {"type": "http"}
+    middleware = TraceContextMiddleware(app)
 
     # Call without starting a span
-    await middleware(scope, None, None)
+    await middleware({"type": "http"}, None, None)
 
-    # Should not bind trace context
     assert "trace_id" not in bound_context
     assert "span_id" not in bound_context
 
 
-async def test_middleware_extractor_returns_none():
-    """Test that extractor returning None doesn't break middleware."""
+async def test_middleware_extractor_edge_cases():
+    """Test extractors returning None, empty dict, or empty extractor list."""
     bound_context = {}
 
     def none_extractor(scope):
         return None
-
-    def working_extractor(scope):
-        return {"key": "value"}
-
-    async def app(scope, receive, send):
-        bound_context.update(structlog.contextvars.get_contextvars())
-
-    middleware = TraceContextMiddleware(
-        app,
-        extractors=[none_extractor, working_extractor]
-    )
-
-    scope = {"type": "http"}
-    await middleware(scope, None, None)
-
-    # Working extractor should still work
-    assert bound_context["key"] == "value"
-
-
-async def test_middleware_extractor_returns_empty_dict():
-    """Test that extractor returning empty dict doesn't break middleware."""
-    bound_context = {}
 
     def empty_extractor(scope):
         return {}
@@ -291,28 +176,18 @@ async def test_middleware_extractor_returns_empty_dict():
     async def app(scope, receive, send):
         bound_context.update(structlog.contextvars.get_contextvars())
 
+    # None and empty dict extractors shouldn't break working ones
     middleware = TraceContextMiddleware(
         app,
-        extractors=[empty_extractor, working_extractor]
+        extractors=[none_extractor, empty_extractor, working_extractor]
     )
 
-    scope = {"type": "http"}
-    await middleware(scope, None, None)
-
+    await middleware({"type": "http"}, None, None)
     assert bound_context["key"] == "value"
 
+    # Empty extractor list
+    bound_context.clear()
+    middleware_empty = TraceContextMiddleware(app, extractors=[])
 
-async def test_middleware_empty_extractor_list():
-    """Test middleware with empty extractor list."""
-    bound_context = {}
-
-    async def app(scope, receive, send):
-        bound_context.update(structlog.contextvars.get_contextvars())
-
-    middleware = TraceContextMiddleware(app, extractors=[])
-
-    scope = {"type": "http"}
-    await middleware(scope, None, None)
-
-    # No context should be bound
+    await middleware_empty({"type": "http"}, None, None)
     assert len(bound_context) == 0

@@ -1,12 +1,12 @@
 """Pluggable log formatters for structlog.
 
 This module provides the Formatter protocol and built-in formatters for
-different output formats (JSON, Console, GCP Cloud Logging).
+different output formats (GCP Cloud Logging).
 """
 
 import logging
 import os
-from typing import Any, Callable, Protocol
+from typing import Protocol
 
 import structlog
 from structlog.typing import Processor
@@ -34,72 +34,6 @@ class Formatter(Protocol):
             List of structlog processors ending with a renderer.
         """
         ...
-
-
-class JSONFormatter:
-    """JSON formatter for machine-readable logs.
-
-    Produces structured JSON output suitable for log aggregation systems
-    and production environments.
-
-    Args:
-        sort_keys: If True, sort dictionary keys in output.
-        indent: Number of spaces for indentation. None for compact output.
-
-    Example:
-        >>> configure_logging(formatter=JSONFormatter(indent=2))
-    """
-
-    def __init__(
-        self,
-        *,
-        sort_keys: bool = False,
-        indent: int | None = None,
-    ):
-        self.sort_keys = sort_keys
-        self.indent = indent
-
-    def get_processors(self) -> list[Processor]:
-        """Return JSON renderer processor."""
-        return [
-            structlog.processors.JSONRenderer(
-                sort_keys=self.sort_keys,
-                indent=self.indent,
-            )
-        ]
-
-
-class ConsoleFormatter:
-    """Human-friendly console formatter with colors.
-
-    Produces pretty-printed console output suitable for development
-    environments and terminal viewing.
-
-    Args:
-        colors: If True, include ANSI color codes in output.
-        exception_formatter: Custom exception formatter callable.
-
-    Example:
-        >>> configure_logging(formatter=ConsoleFormatter())
-    """
-
-    def __init__(
-        self,
-        *,
-        colors: bool = True,
-        exception_formatter: Callable[..., Any] | None = None,
-    ):
-        self.colors = colors
-        self.exception_formatter = exception_formatter
-
-    def get_processors(self) -> list[Processor]:
-        """Return console renderer processor."""
-        return [
-            structlog.dev.ConsoleRenderer(
-                colors=self.colors,
-                exception_formatter=self.exception_formatter,
-            )
-        ]
 
 
 class GCPFormatter:
