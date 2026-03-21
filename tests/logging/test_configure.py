@@ -50,9 +50,8 @@ def test_console_formatter_produces_human_readable_output(capsys):
     assert "value" in output
 
 
-def test_auto_formatter_tty_detection(monkeypatch, capsys):
-    """Test that AUTO formatter selects format based on TTY status."""
-    # Non-TTY should use JSON
+def test_auto_formatter_non_tty_uses_json(monkeypatch, capsys):
+    """Test that AUTO formatter uses JSON when not a TTY."""
     monkeypatch.setattr("sys.stderr.isatty", lambda: False)
     configure_logging(formatter=FormatterType.AUTO)
 
@@ -63,7 +62,9 @@ def test_auto_formatter_tty_detection(monkeypatch, capsys):
     log_entry = json.loads(captured.err.strip())
     assert log_entry["event"] == "non-tty test"
 
-    # TTY should use console (not JSON)
+
+def test_auto_formatter_tty_uses_console(monkeypatch, capsys):
+    """Test that AUTO formatter uses console when on a TTY."""
     monkeypatch.setattr("sys.stderr.isatty", lambda: True)
     configure_logging(formatter=FormatterType.AUTO)
 
@@ -93,10 +94,8 @@ def test_custom_formatter(capsys):
     captured = capsys.readouterr()
     output = captured.err
 
-    # Should be indented (contains newlines)
     assert "\n" in output
 
-    # Should be valid JSON with sorted keys
     log_entry = json.loads(output)
     assert log_entry["event"] == "test"
     assert output.index('"a_key"') < output.index('"z_key"')
@@ -146,7 +145,6 @@ def test_formatter_applied_when_stdlib_disabled(capsys):
     logger = structlog.get_logger()
     logger.info("test message", key="value")
 
-    # PrintLoggerFactory outputs to stdout
     captured = capsys.readouterr()
     log_entry = json.loads(captured.out.strip())
 
@@ -256,13 +254,11 @@ def test_gcp_formatter_without_project_id(caplog):
     if "GOOGLE_CLOUD_PROJECT" in os.environ:
         del os.environ["GOOGLE_CLOUD_PROJECT"]
 
-    # Should warn at creation time
     with caplog.at_level(logging.WARNING):
         formatter = GCPFormatter()
 
     assert "No project_id provided" in caplog.text
 
-    # Should skip trace field but include span_id
     processors = formatter.get_processors()
     event_dict = {"trace_id": "abc123", "span_id": "def456", "event": "test"}
     result = processors[0](None, None, event_dict.copy())
@@ -278,7 +274,6 @@ def test_gcp_formatter_missing_trace_context():
     formatter = GCPFormatter(project_id="test-project")
     processors = formatter.get_processors()
 
-    # No trace context at all
     event_dict = {"event": "test message", "key": "value"}
     result = processors[0](None, None, event_dict.copy())
 
@@ -286,7 +281,6 @@ def test_gcp_formatter_missing_trace_context():
     assert "logging.googleapis.com/spanId" not in result
     assert result["event"] == "test message"
 
-    # Only span_id (no trace_id)
     event_dict = {"span_id": "def456", "event": "test"}
     result = processors[0](None, None, event_dict.copy())
 
@@ -297,23 +291,34 @@ def test_gcp_formatter_missing_trace_context():
 # Reconfiguration Tests
 
 
-def test_reconfiguration_changes_output_format(capsys):
-    """Test that reconfiguring changes the output format."""
-    # First configure with JSON
+def test_double_configure_raises():
+    """Test that calling configure_logging() twice raises RuntimeError."""
     configure_logging(formatter=FormatterType.JSON)
-    logger = structlog.get_logger()
-    logger.info("json output")
 
-    captured1 = capsys.readouterr()
-    json.loads(captured1.err.strip())  # Should be valid JSON
+    with pytest.raises(RuntimeError, match="already been called"):
+        configure_logging(formatter=FormatterType.CONSOLE)
 
-    # Reconfigure with console
-    configure_logging(formatter=FormatterType.CONSOLE)
-    logger = structlog.get_logger()
-    logger.info("console output")
 
-    captured2 = capsys.readouterr()
+# Handler Tests
 
-    # Should NOT be valid JSON anymore
-    with pytest.raises(json.JSONDecodeError):
-        json.loads(captured2.err.strip())
+
+def test_existing_handlers_preserved_by_default():
+    """Test that existing root logger handlers are not cleared by default."""
+    root_logger = logging.getLogger()
+    existing_handler = logging.NullHandler()
+    root_logger.addHandler(existing_handler)
+
+    configure_logging(formatter=FormatterType.JSON)
+
+    assert existing_handler in root_logger.handlers
+
+
+def test_clear_handlers_removes_existing():
+    """Test that clear_handlers=True removes existing handlers."""
+    root_logger = logging.getLogger()
+    existing_handler = logging.NullHandler()
+    root_logger.addHandler(existing_handler)
+
+    configure_logging(formatter=FormatterType.JSON, clear_handlers=True)
+
+    assert existing_handler not in root_logger.handlers

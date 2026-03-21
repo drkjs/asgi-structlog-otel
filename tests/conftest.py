@@ -1,4 +1,6 @@
-import pytest 
+import logging
+
+import pytest
 from opentelemetry import trace
 from opentelemetry.sdk.trace import TracerProvider, Tracer
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
@@ -32,10 +34,15 @@ def clear_structlog_context():
     """
     import structlog
 
-    # Clear before test
     structlog.contextvars.clear_contextvars()
-
     yield
-
-    # Clear after test
     structlog.contextvars.clear_contextvars()
+
+@pytest.fixture(autouse=True)
+def reset_configure_state():
+    """Reset configure_logging guard and root logger between tests."""
+    import asgi_structlog_otel.logging.configure as cfg
+    cfg._configured = False
+    yield
+    cfg._configured = False
+    logging.getLogger().handlers.clear()

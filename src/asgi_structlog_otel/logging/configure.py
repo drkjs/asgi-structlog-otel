@@ -10,6 +10,8 @@ from structlog.typing import Processor, WrappedLogger
 
 from asgi_structlog_otel.logging.formatter import Formatter
 
+_configured = False
+
 
 class FormatterType(StrEnum):
     """Built-in formatter types for configure_logging.
@@ -30,6 +32,7 @@ def configure_logging(
     formatter: Formatter | FormatterType = FormatterType.AUTO,
     level: int = logging.INFO,
     configure_stdlib: bool = True,
+    clear_handlers: bool = False,
     processors: list[Processor] | None = None,
     logger_factory: Callable[..., WrappedLogger] | None = None,
 ) -> None:
@@ -39,6 +42,9 @@ def configure_logging(
     OpenTelemetry spans in log output. Works seamlessly with
     TraceContextMiddleware to correlate logs with distributed traces.
 
+    This function can only be called once. Subsequent calls will raise
+    RuntimeError to prevent accidental reconfiguration.
+
     Args:
         formatter: Output formatter. Can be a FormatterType enum value,
             a custom Formatter instance, or None to skip configuration.
@@ -46,6 +52,9 @@ def configure_logging(
         configure_stdlib: If True, configure stdlib logging to forward
             to structlog. Recommended for comprehensive log capture from
             third-party libraries.
+        clear_handlers: If True, remove all existing handlers from the root
+            logger before adding the structlog handler. Defaults to False to
+            avoid destroying handlers set up by frameworks or the user.
         processors: Additional custom processors to insert before formatter
             processors. Common processors (merge_contextvars, add_log_level,
             etc.) are added automatically.
@@ -89,6 +98,14 @@ def configure_logging(
         The processor chain always includes structlog.contextvars.merge_contextvars
         to pick up trace context from TraceContextMiddleware.
     """
+    global _configured
+    if _configured:
+        raise RuntimeError(
+            "configure_logging() has already been called. "
+            "Logging can only be configured once per process."
+        )
+    _configured = True
+
     formatter_processors = _resolve_formatter(formatter)
     base_processors = _build_base_processors()
 
@@ -104,6 +121,7 @@ def configure_logging(
             formatter_processors=formatter_processors,
             base_processors=base_processors,
             level=level,
+            clear_handlers=clear_handlers,
         )
         if logger_factory is None:
             logger_factory = structlog.stdlib.LoggerFactory()
@@ -169,6 +187,7 @@ def _configure_stdlib_logging(
     formatter_processors: list[Processor],
     base_processors: list[Processor],
     level: int,
+    clear_handlers: bool,
 ) -> None:
     """Configure stdlib logging to forward to structlog.
 
@@ -176,6 +195,7 @@ def _configure_stdlib_logging(
         formatter_processors: Processors for formatting output.
         base_processors: Base processor chain.
         level: Logging level to set on root logger.
+        clear_handlers: If True, remove existing handlers before adding ours.
     """
     handler = logging.StreamHandler()
     handler.setFormatter(
@@ -188,6 +208,7 @@ def _configure_stdlib_logging(
     )
 
     root_logger = logging.getLogger()
-    root_logger.handlers.clear()
+    if clear_handlers:
+        root_logger.handlers.clear()
     root_logger.addHandler(handler)
     root_logger.setLevel(level)
