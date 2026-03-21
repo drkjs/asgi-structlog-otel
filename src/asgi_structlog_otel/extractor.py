@@ -1,9 +1,6 @@
 import re
 from typing import Any, Protocol
 
-from opentelemetry import trace
-from opentelemetry.trace.span import INVALID_SPAN
-
 # W3C Trace Context traceparent header format:
 # {version}-{trace_id}-{parent_id}-{flags}
 # Example: 00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01
@@ -37,7 +34,20 @@ class Extractor(Protocol):
 
 
 def extract_otel(scope: dict[str, Any], context: dict[str, Any]) -> dict[str, Any]:
-    """Extract trace context from the current OpenTelemetry span."""
+    """Extract trace context from the current OpenTelemetry span.
+
+    Requires opentelemetry-api to be installed. Install with:
+        pip install asgi-structlog-otel[otel]
+    """
+    try:
+        from opentelemetry import trace
+        from opentelemetry.trace.span import INVALID_SPAN
+    except ImportError:
+        raise ImportError(
+            "opentelemetry-api is required for extract_otel. "
+            "Install it with: pip install asgi-structlog-otel[otel]"
+        )
+
     span = trace.get_current_span()
 
     if span is INVALID_SPAN or not span.is_recording():
