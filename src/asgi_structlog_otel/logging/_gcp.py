@@ -4,43 +4,25 @@ This module provides processors for transforming OpenTelemetry trace context
 into Google Cloud Logging format.
 """
 
-import os
-
 from structlog.typing import EventDict, Processor, WrappedLogger
 
 
-def add_gcp_trace_fields(
+def _add_gcp_trace_fields(
     project_id: str | None = None,
 ) -> Processor:
     """Create processor that transforms trace context to GCP format.
 
-    Transforms OpenTelemetry trace context fields into Google Cloud Logging
-    format for proper trace correlation:
+    Transforms trace context fields into Google Cloud Logging format:
     - trace_id → logging.googleapis.com/trace (with project prefix)
     - span_id → logging.googleapis.com/spanId
 
-    If no project_id is available, the trace field will be omitted but
+    If no project_id is provided, the trace field will be omitted but
     span_id will still be included.
 
     Args:
-        project_id: GCP project ID. If None, attempts to read from
-            GOOGLE_CLOUD_PROJECT environment variable.
-
-    Returns:
-        Processor function that transforms trace fields.
-
-    Example:
-        >>> processor = add_gcp_trace_fields(project_id="my-project")
-        >>> event_dict = processor(None, None, {
-        ...     "trace_id": "0af7651916cd43dd8448eb211c80319c",
-        ...     "span_id": "b7ad6b7169203331",
-        ...     "event": "test",
-        ... })
-        >>> event_dict["logging.googleapis.com/trace"]
-        'projects/my-project/traces/0af7651916cd43dd8448eb211c80319c'
+        project_id: GCP project ID, already resolved by GCPFormatter.
     """
-    # Resolve project_id once at processor creation time
-    resolved_project_id = project_id or os.environ.get("GOOGLE_CLOUD_PROJECT")
+    resolved_project_id = project_id
 
     def processor(
         logger: WrappedLogger,

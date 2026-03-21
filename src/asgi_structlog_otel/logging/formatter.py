@@ -89,9 +89,9 @@ class GCPFormatter:
 
     def get_processors(self) -> list[Processor]:
         """Return GCP field transformation and JSON renderer processors."""
-        from asgi_structlog_otel.logging._gcp import add_gcp_trace_fields
+        from asgi_structlog_otel.logging._gcp import _add_gcp_trace_fields
 
         return [
-            add_gcp_trace_fields(project_id=self.project_id),
+            _add_gcp_trace_fields(project_id=self.project_id),
             structlog.processors.JSONRenderer(sort_keys=self.sort_keys),
         ]
