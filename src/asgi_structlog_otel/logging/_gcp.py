@@ -5,7 +5,6 @@ into Google Cloud Logging format.
 """
 
 import os
-from typing import Any
 
 from structlog.typing import EventDict, Processor, WrappedLogger
 

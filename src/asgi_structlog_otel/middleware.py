@@ -31,8 +31,8 @@ class TraceContextMiddleware:
 
         for extractor in self.extractors:
             try:
-                data = extractor(scope)
-            except Exception as e:
+                data = extractor(scope, ctx)
+            except Exception:
                 logger.warning(
                     "Extractor failed: %s",
                     extractor.__name__ if hasattr(extractor, '__name__') else str(extractor),

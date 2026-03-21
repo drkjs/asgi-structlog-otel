@@ -1,6 +1,7 @@
 from asgi_structlog_otel.extractor import (
     Extractor,
     extract_from_traceparent,
+    extract_gcp_trace_header,
     extract_otel,
 )
 from asgi_structlog_otel.logging import (
@@ -16,6 +17,7 @@ __all__ = [
     "TraceContextMiddleware",
     "configure_logging",
     "extract_from_traceparent",
+    "extract_gcp_trace_header",
     "extract_otel",
     "FormatterType",
     "Formatter",

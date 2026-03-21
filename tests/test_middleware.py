@@ -41,11 +41,11 @@ async def test_middleware_multiple_extractors_execution_and_merging(tracer):
     execution_order = []
     bound_context = {}
 
-    def extractor_one(scope):
+    def extractor_one(scope, context):
         execution_order.append(1)
         return {"key1": "value1", "shared": "from_one"}
 
-    def extractor_two(scope):
+    def extractor_two(scope, context):
         execution_order.append(2)
         return {"key2": "value2", "shared": "from_two"}
 
@@ -70,10 +70,10 @@ async def test_middleware_extractor_error_handling(tracer, caplog):
     bound_context = {}
     app_called = False
 
-    def failing_extractor(scope):
+    def failing_extractor(scope, context):
         raise ValueError("Extractor failed")
 
-    def working_extractor(scope):
+    def working_extractor(scope, context):
         return {"key": "value"}
 
     async def app(scope, receive, send):
@@ -164,13 +164,13 @@ async def test_middleware_extractor_edge_cases():
     """Test extractors returning None, empty dict, or empty extractor list."""
     bound_context = {}
 
-    def none_extractor(scope):
+    def none_extractor(scope, context):
         return None
 
-    def empty_extractor(scope):
+    def empty_extractor(scope, context):
         return {}
 
-    def working_extractor(scope):
+    def working_extractor(scope, context):
         return {"key": "value"}
 
     async def app(scope, receive, send):
