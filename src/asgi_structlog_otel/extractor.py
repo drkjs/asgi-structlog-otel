@@ -65,7 +65,7 @@ def extract_from_traceparent(scope: dict[str, Any], context: dict[str, Any]) -> 
     """Extract trace context directly from the W3C traceparent header.
 
     Unlike extract_otel (which reads from the active OpenTelemetry span),
-    this extracts trace_id and span_id by parsing the incoming header directly.
+    this extracts trace_id by parsing the incoming header directly.
 
     Trade-offs vs extract_otel:
     + Works without initializing OpenTelemetry
